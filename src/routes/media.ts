@@ -27,6 +27,9 @@ export function mediaRouter(media: MediaService, limits: boolean) {
     const asset = await media.visible(objectId(req.params.mediaId), Boolean(res.locals.auth));
     if (asset.state !== 'ready') throw new HttpError(409, 'MEDIA_NOT_READY', 'Media is not ready.');
     res.setHeader('Cache-Control', 'private, no-store');
+    // Published files are intentionally public; private files still require the
+    // authorization check above. Allow the separate frontend origin to render them.
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.type(asset.mimeType);
     // Range and HEAD requests pass through the same publication checks.
     res.sendFile(media.store.path(asset.storageKey), { cacheControl: false, acceptRanges: true, dotfiles: 'deny' }, error => {

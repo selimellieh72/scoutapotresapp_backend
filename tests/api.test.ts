@@ -275,7 +275,8 @@ describe('posts, profile, search, and media', () => {
     await request(app).get(asset.url).set('Authorization', bearer(token)).expect(200);
     const first = (await publish(token, { category: 'installation', mediaIds: [asset.id] })).body.data.id;
     const secondPost = (await publish(token, { category: 'jeux', text: 'Photo scout', mediaIds: [asset.id] })).body.data.id;
-    await request(app).get(asset.url).expect(200);
+    const publicFile = await request(app).get(asset.url).expect(200);
+    expect(publicFile.headers['cross-origin-resource-policy']).toBe('cross-origin');
     await request(app).get(asset.url).set('Range', 'bytes=0-9').expect(206);
     const rangeError = await request(app).get(asset.url).set('Range', 'bytes=999999-').expect(416);
     expect(rangeError.body.error.code).toBe('INVALID_RANGE');

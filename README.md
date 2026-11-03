@@ -187,6 +187,9 @@ integration. Multiple application replicas need a shared/provider-backed adapter
 - Unattached uploads are private. Guests can download only while a published post
   or current profile references the asset. Downloads re-check access on every
   request, including HEAD/range requests; no public directory URL is exposed.
+- Media file responses permit cross-origin rendering so the separate frontend
+  origin can display published images/videos. Authorization/publication checks
+  still execute before any file bytes are sent.
 - Attachment/reference counts, post/profile updates, and audit events commit in
   one transaction. Deletion atomically claims unreferenced media, preventing a
   concurrent attachment from leaving a dangling reference.
