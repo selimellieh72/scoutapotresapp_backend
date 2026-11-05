@@ -12,9 +12,6 @@ export const postInput = z.object({ category: z.enum(categories), title: z.strin
 export const postPatch = z.object({ category: z.enum(categories).optional(), title: z.string().trim().max(200).optional(),
   text: z.string().trim().max(20_000).optional(), mediaIds: mediaIds.optional() }).strict()
   .refine(body => Object.keys(body).length > 0, 'Provide at least one field.');
-export const groupPatch = z.object({ name: z.string().trim().min(1).max(120).optional(),
-  description: z.string().trim().max(2000).optional(), logoMediaId: idSchema.nullable().optional(), coverMediaId: idSchema.nullable().optional() }).strict()
-  .refine(body => Object.keys(body).length > 0, 'Provide at least one field.');
 const pagingFields = { category: z.enum(categories).optional(), contentType: z.enum(['text', 'image', 'video']).optional(),
   cursor: z.string().min(1).max(1000).optional(), limit: z.coerce.number().int().min(1).max(100).default(20) };
 export const feedQuery = z.object(pagingFields).strict();
@@ -82,8 +79,8 @@ export class ContentService {
     const matches = new RegExp(escaped(query.q), 'i').test(`${group.name}\n${group.description}`);
     return { data: { groups: matches ? [await this.groupDto(group)] : [], posts: posts.data }, page: posts.page };
   }
-  private async audit(session: ClientSession, adminId: ObjectId, action: string, targetType: 'post' | 'group', targetId: ObjectId, requestId: string) {
-    await this.db.audit.insertOne({ _id: new ObjectId(), actorAdminId: adminId, action, targetType, targetId, requestId, timestamp: new Date() }, { session });
+  private async audit(session: ClientSession, adminId: ObjectId, action: string, targetId: ObjectId, requestId: string) {
+    await this.db.audit.insertOne({ _id: new ObjectId(), actorAdminId: adminId, action, targetType: 'post', targetId, requestId, timestamp: new Date() }, { session });
   }
   async createPost(input: z.infer<typeof postInput>, adminId: ObjectId, requestId: string) {
     const id = new ObjectId();
@@ -95,7 +92,7 @@ export class ContentService {
       await this.db.posts.insertOne({ _id: id, category: input.category, title: input.title, text: input.text, mediaIds: ids,
         mediaTypes: [...new Set(assets.map(asset => asset.type))], createdByAdminId: adminId, updatedByAdminId: adminId,
         publishedAt: now, createdAt: now, updatedAt: now, deletedAt: null }, { session });
-      await this.audit(session, adminId, 'post.created', 'post', id, requestId);
+      await this.audit(session, adminId, 'post.created', id, requestId);
     });
     return this.post(id);
   }
@@ -109,7 +106,7 @@ export class ContentService {
       const assets = await changeReferences(this.db, existing.mediaIds, ids, session);
       await this.db.posts.updateOne({ _id: id, deletedAt: null }, { $set: { text, title: input.title ?? existing.title,
         category: input.category ?? existing.category, mediaIds: ids, mediaTypes: [...new Set(assets.map(asset => asset.type))], updatedByAdminId: adminId, updatedAt: new Date() } }, { session });
-      await this.audit(session, adminId, 'post.updated', 'post', id, requestId);
+      await this.audit(session, adminId, 'post.updated', id, requestId);
     });
     return this.post(id);
   }
@@ -120,23 +117,7 @@ export class ContentService {
       await changeReferences(this.db, post.mediaIds, [], session);
       const now = new Date();
       await this.db.posts.updateOne({ _id: id }, { $set: { deletedAt: now, updatedAt: now, updatedByAdminId: adminId } }, { session });
-      await this.audit(session, adminId, 'post.deleted', 'post', id, requestId);
+      await this.audit(session, adminId, 'post.deleted', id, requestId);
     });
-  }
-  async updateGroup(input: z.infer<typeof groupPatch>, adminId: ObjectId, requestId: string) {
-    await this.db.transaction(async session => {
-      const group = await this.db.group.findOne({ singletonKey: 'main' }, { session });
-      if (!group) throw notFound();
-      const logo = input.logoMediaId === undefined ? group.logoMediaId : input.logoMediaId === null ? null : new ObjectId(input.logoMediaId);
-      const cover = input.coverMediaId === undefined ? group.coverMediaId : input.coverMediaId === null ? null : new ObjectId(input.coverMediaId);
-      const before = [group.logoMediaId, group.coverMediaId].filter((id): id is ObjectId => id !== null);
-      const after = [logo, cover].filter((id): id is ObjectId => id !== null);
-      const assets = await changeReferences(this.db, before, after, session);
-      if (assets.some(asset => asset.type !== 'image')) throw new HttpError(400, 'INVALID_MEDIA', 'Group logo and cover must be images.');
-      await this.db.group.updateOne({ _id: group._id }, { $set: { name: input.name ?? group.name,
-        description: input.description ?? group.description, logoMediaId: logo, coverMediaId: cover, updatedAt: new Date() } }, { session });
-      await this.audit(session, adminId, 'group.updated', 'group', group._id, requestId);
-    });
-    return this.groupDto(await this.group());
   }
 }

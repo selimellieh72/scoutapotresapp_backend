@@ -86,7 +86,6 @@ describe('public reading and authorization', () => {
     await request(app).post(`${api}/posts`).send({ category: 'article', text: 'No' }).expect(401);
     await request(app).patch(`${api}/posts/${id}`).send({ text: 'No' }).expect(401);
     await request(app).delete(`${api}/posts/${id}`).expect(401);
-    await request(app).patch(`${api}/group`).send({ name: 'No' }).expect(401);
     await request(app).post(`${api}/media`).attach('file', image, 'photo.png').expect(401);
     await request(app).delete(`${api}/media/${id}`).expect(401);
     await request(app).get(`${api}/me`).expect(401);
@@ -289,30 +288,22 @@ describe('posts, profile, search, and media', () => {
     await request(app).get(asset.url).set('Authorization', bearer(token)).expect(404);
   });
 
-  it('updates the singleton profile and counts a reused logo/cover independently', async () => {
+  it('serves group metadata read-only even for an active admin', async () => {
     const token = (await login()).accessToken;
-    const asset = (await upload(token)).body.data;
-    await request(app).patch(`${api}/group`).set('Authorization', bearer(token))
-      .send({ name: 'Scout des Apôtres', description: 'Nos activités', logoMediaId: asset.id, coverMediaId: asset.id }).expect(200);
-    expect((await db.media.findOne({ _id: new ObjectId(asset.id) }))?.referenceCount).toBe(2);
-    await request(app).get(asset.url).expect(200);
-    await request(app).patch(`${api}/group`).set('Authorization', bearer(token)).send({ logoMediaId: null }).expect(200);
-    expect((await db.media.findOne({ _id: new ObjectId(asset.id) }))?.referenceCount).toBe(1);
-    await request(app).patch(`${api}/group`).set('Authorization', bearer(token)).send({ coverMediaId: null }).expect(200);
-    await request(app).get(asset.url).expect(404);
-    expect(await db.group.countDocuments()).toBe(1);
-    const search = await request(app).get(`${api}/search?q=activités`).expect(200);
-    expect(search.body.data.groups).toHaveLength(1);
+    const before = await request(app).get(`${api}/group`).expect(200);
+    const patch = { name: 'Changed name', description: 'Changed description', logoMediaId: null, coverMediaId: null };
+    await request(app).patch(`${api}/group`).send(patch).expect(404);
+    await request(app).patch(`${api}/group`).set('Authorization', bearer(token)).send(patch).expect(404);
+    await request(app).get(`${api}/group`).expect(200, before.body);
   });
 
-  it('verifies MP4 metadata, publishes mixed media, and rejects video profile images', async () => {
+  it('verifies MP4 metadata and publishes mixed media', async () => {
     const token = (await login()).accessToken;
     const videoFile = await readFile(new URL('./fixtures/green.mp4', import.meta.url));
     const video = (await request(app).post(`${api}/media`).set('Authorization', bearer(token))
       .attach('file', videoFile, 'green.mp4').expect(201)).body.data;
     expect(video).toMatchObject({ type: 'video', mimeType: 'video/mp4', width: 16, height: 16, durationSeconds: 1, state: 'ready' });
     await request(app).get(video.url).expect(404);
-    await request(app).patch(`${api}/group`).set('Authorization', bearer(token)).send({ logoMediaId: video.id }).expect(400);
     expect((await db.media.findOne({ _id: new ObjectId(video.id) }))?.referenceCount).toBe(0);
     const photo = (await upload(token)).body.data;
     const post = await publish(token, { category: 'atelier', text: 'Mixed activity', mediaIds: [video.id, photo.id] });

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { ContentService } from '../services/content.js';
-import { feedQuery, groupPatch, postInput, postPatch, searchQuery } from '../services/content.js';
+import { feedQuery, postInput, postPatch, searchQuery } from '../services/content.js';
 import { requireAdmin } from '../services/auth.js';
 import { objectId } from '../http.js';
 
@@ -20,9 +20,6 @@ export function contentRouter(content: ContentService) {
     res.status(204).end();
   });
   router.get('/group', async (_req, res) => { res.json({ data: await content.groupDto(await content.group()) }); });
-  router.patch('/group', requireAdmin, async (req, res) => {
-    res.json({ data: await content.updateGroup(groupPatch.parse(req.body), res.locals.auth.admin._id, res.locals.requestId) });
-  });
   router.get('/search', async (req, res) => { res.json(await content.search(searchQuery.parse(req.query))); });
   router.get('/discover', async (req, res) => {
     const posts = await content.list(feedQuery.parse(req.query));

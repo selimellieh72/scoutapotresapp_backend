@@ -1,8 +1,8 @@
 # Scout des Apôtres backend
 
 Express 5 + TypeScript + the official MongoDB driver. One Scout group, public
-guest browsing, and multiple admin accounts for publishing. The singleton group
-profile is editable. No likes, comments, reposts, following, messaging, reader
+guest browsing, and multiple admin accounts for publishing. The app uses fixed
+group branding. No likes, comments, reposts, following, messaging, reader
 accounts, or competition module are implemented.
 
 The [backend specification](docs/backend-spec.md) records the agreed scope and
@@ -75,7 +75,6 @@ without it. Unknown endpoints return `404`.
 | PATCH | `/posts/:postId` | Admin |
 | DELETE | `/posts/:postId` | Admin |
 | GET | `/group` | Public |
-| PATCH | `/group` | Admin |
 | GET | `/search?q=...` | Public |
 | GET | `/discover` | Public |
 | GET | `/app-info` | Public |
@@ -126,12 +125,11 @@ escaped, case-insensitive literal matching, not arbitrary regex or relevance
 ranking. The group result has zero or one entry. `/discover` returns
 `{ data: { group: {...}, posts: [...] }, page: ... }` with recent posts.
 
-### Editable group profile
+### Read-only group metadata
 
-PATCH `/group` accepts `name` (1-120 characters), `description` (up to 2,000),
-`logoMediaId`, and `coverMediaId`. Image IDs must refer to ready image assets;
-`null` clears a slot. A unique key enforces a single profile. A logo/cover image
-is public while used by the profile, even without a referencing post.
+`GET /group` and the group fields in existing read responses remain available
+for older clients. The mobile app bundles its name and logo and shows no group
+profile screen. There is no group mutation endpoint.
 
 ## Authentication details
 
@@ -190,7 +188,7 @@ integration. Multiple application replicas need a shared/provider-backed adapter
 - Media file responses permit cross-origin rendering so the separate frontend
   origin can display published images/videos. Authorization/publication checks
   still execute before any file bytes are sent.
-- Attachment/reference counts, post/profile updates, and audit events commit in
+- Attachment/reference counts, post updates, and audit events commit in
   one transaction. Deletion atomically claims unreferenced media, preventing a
   concurrent attachment from leaving a dangling reference.
 - Processing failures are marked `failed` and their files removed. Admins can

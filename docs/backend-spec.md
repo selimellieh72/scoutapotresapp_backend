@@ -1,5 +1,10 @@
 # Groupe Scout des Apôtres - Backend specification
 
+Update 2026-11-05. Group branding is fixed in the app and the group write
+endpoint has been removed. The group read responses in this original design
+remain available to older clients. This decision supersedes the group editing
+requirements below.
+
 Status: reviewed draft with an initial implementation in this repository.
 Date: 2026-11-02
 Last updated: 2026-11-03
