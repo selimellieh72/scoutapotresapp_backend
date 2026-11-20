@@ -12,6 +12,7 @@ import { MediaService } from './services/media.js';
 import { authRouter, meRouter } from './routes/auth.js';
 import { contentRouter } from './routes/content.js';
 import { mediaRouter } from './routes/media.js';
+import { opsRouter } from './routes/ops.js';
 import { errorHandler, HttpError, notFound, requestIdentity } from './http.js';
 
 export interface AppDependencies {
@@ -48,6 +49,7 @@ export function createApp({ db, config, store, mailer, rateLimits = true }: AppD
   api.use('/auth', authRouter(auth, rateLimits));
   api.use('/me', meRouter);
   api.use('/media', mediaRouter(new MediaService(db, store), rateLimits));
+  api.use('/ops', opsRouter(db));
   api.get('/app-info', (_req, res) => { res.json({ data: {
     about: config.ABOUT_TEXT, contactEmail: config.CONTACT_EMAIL ?? null,
     privacyPolicyUrl: config.PRIVACY_POLICY_URL ?? null, supportedLanguages: config.supportedLanguages,
