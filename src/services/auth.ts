@@ -1,7 +1,7 @@
 import type { RequestHandler } from 'express';
 import { ObjectId } from 'mongodb';
 import type { Database } from '../db.js';
-import type { Admin, Session } from '../types.js';
+import type { GroupAccount, Session } from '../types.js';
 import { HttpError, unauthorized } from '../http.js';
 import { digest, hashPassword, secret, verifyPassword } from './crypto.js';
 import type { ResetMailer } from './email.js';
@@ -9,8 +9,8 @@ import type { ResetMailer } from './email.js';
 const ACCESS_MS = 15 * 60_000;
 const SESSION_MS = 30 * 24 * 60 * 60_000;
 const RESET_MS = 30 * 60_000;
-export const adminDto = (admin: Admin) => ({ id: admin._id.toHexString(), email: admin.email,
-  username: admin.username ?? null, displayName: admin.displayName, role: admin.role, status: admin.status });
+export const accountDto = (group: GroupAccount) => ({ id: group._id.toHexString(), email: group.email,
+  username: group.username, name: group.name, status: group.status });
 
 function parseToken(token: string) {
   const match = /^([a-f0-9]{24})\.([A-Za-z0-9_-]{43})$/.exec(token);
@@ -29,20 +29,20 @@ export class AuthService {
   async login(identifier: string, password: string) {
     const normalized = identifier.trim().toLowerCase();
     const filter = normalized.includes('@') ? { email: normalized } : { username: normalized };
-    const admin = await this.db.admins.findOne(filter);
-    const valid = await verifyPassword(password, admin?.passwordHash ?? await this.dummyPassword);
-    if (!valid || !admin || admin.status !== 'active' || admin.role !== 'admin') throw unauthorized();
+    const group = await this.db.groups.findOne(filter);
+    const valid = await verifyPassword(password, group?.passwordHash ?? await this.dummyPassword);
+    if (!valid || !group || group.status !== 'active') throw unauthorized();
     const now = new Date();
     const id = new ObjectId();
     const pair = this.tokenPair(id);
     const session: Session = {
-      _id: id, adminId: admin._id, authVersion: admin.authVersion,
+      _id: id, groupId: group._id, authVersion: group.authVersion,
       accessTokenHash: digest(pair.accessToken), accessExpiresAt: new Date(now.getTime() + ACCESS_MS),
       refreshTokenHash: digest(pair.refreshToken), usedRefreshTokenHashes: [],
       expiresAt: new Date(now.getTime() + SESSION_MS), revokedAt: null, createdAt: now, updatedAt: now,
     };
     await this.db.sessions.insertOne(session);
-    return { ...pair, accessExpiresAt: session.accessExpiresAt, sessionExpiresAt: session.expiresAt, admin: adminDto(admin) };
+    return { ...pair, accessExpiresAt: session.accessExpiresAt, sessionExpiresAt: session.expiresAt, group: accountDto(group) };
   }
 
   async authenticate(token: string) {
@@ -51,9 +51,9 @@ export class AuthService {
     const session = await this.db.sessions.findOne({ _id: parsed.sessionId, accessTokenHash: parsed.hash,
       accessExpiresAt: { $gt: now }, expiresAt: { $gt: now }, revokedAt: null });
     if (!session) throw unauthorized();
-    const admin = await this.db.admins.findOne({ _id: session.adminId, status: 'active', role: 'admin', authVersion: session.authVersion });
-    if (!admin) throw unauthorized();
-    return { admin, session };
+    const group = await this.db.groups.findOne({ _id: session.groupId, status: 'active', authVersion: session.authVersion });
+    if (!group) throw unauthorized();
+    return { group, session };
   }
 
   async refresh(token: string) {
@@ -61,8 +61,8 @@ export class AuthService {
     const now = new Date();
     const existing = await this.db.sessions.findOne({ _id: parsed.sessionId, expiresAt: { $gt: now }, revokedAt: null });
     if (!existing) throw unauthorized();
-    const admin = await this.db.admins.findOne({ _id: existing.adminId, status: 'active', role: 'admin', authVersion: existing.authVersion });
-    if (!admin) throw unauthorized();
+    const group = await this.db.groups.findOne({ _id: existing.groupId, status: 'active', authVersion: existing.authVersion });
+    if (!group) throw unauthorized();
     const pair = this.tokenPair(existing._id);
     const rotated = await this.db.sessions.findOneAndUpdate({ _id: existing._id, refreshTokenHash: parsed.hash,
       revokedAt: null, expiresAt: { $gt: now }, 'usedRefreshTokenHashes.4999': { $exists: false } }, {
@@ -71,14 +71,13 @@ export class AuthService {
       $push: { usedRefreshTokenHashes: parsed.hash },
     }, { returnDocument: 'after' });
     if (!rotated) {
-      // Atomic compare-and-swap makes simultaneous refreshes single-use as well.
       await this.db.sessions.updateOne({ _id: existing._id, $or: [
         { usedRefreshTokenHashes: parsed.hash },
         { refreshTokenHash: parsed.hash, 'usedRefreshTokenHashes.4999': { $exists: true } },
       ] }, { $set: { revokedAt: now, updatedAt: now } });
       throw unauthorized();
     }
-    return { ...pair, accessExpiresAt: rotated.accessExpiresAt, sessionExpiresAt: rotated.expiresAt, admin: adminDto(admin) };
+    return { ...pair, accessExpiresAt: rotated.accessExpiresAt, sessionExpiresAt: rotated.expiresAt, group: accountDto(group) };
   }
 
   async logout(token: string) {
@@ -92,15 +91,13 @@ export class AuthService {
   async forgotPassword(identifier: string) {
     if (!this.mailer) throw new HttpError(503, 'EMAIL_UNAVAILABLE', 'Password recovery is not configured.');
     const normalized = identifier.trim().toLowerCase();
-    const admin = await this.db.admins.findOne({ ...(normalized.includes('@') ? { email: normalized } : { username: normalized }), status: 'active' });
-    if (!admin) return;
+    const group = await this.db.groups.findOne({ ...(normalized.includes('@') ? { email: normalized } : { username: normalized }), status: 'active' });
+    if (!group) return;
     const token = secret();
     const now = new Date();
-    await this.db.resets.insertOne({ _id: new ObjectId(), adminId: admin._id, tokenHash: digest(token),
+    await this.db.resets.insertOne({ _id: new ObjectId(), groupId: group._id, tokenHash: digest(token),
       expiresAt: new Date(now.getTime() + RESET_MS), consumedAt: null, createdAt: now, updatedAt: now });
-    // SMTP latency must not reveal whether the identifier exists. Delivery is
-    // best-effort in-process; a durable mail queue is a future deployment choice.
-    void this.mailer.sendReset(admin.email, token).catch(() => {
+    void this.mailer.sendReset(group.email, token).catch(() => {
       console.error(JSON.stringify({ event: 'reset_delivery_failed' }));
     });
   }
@@ -112,11 +109,11 @@ export class AuthService {
       const reset = await this.db.resets.findOneAndUpdate({ tokenHash: digest(token), consumedAt: null, expiresAt: { $gt: now } },
         { $set: { consumedAt: now, updatedAt: now } }, { session });
       if (!reset) throw new HttpError(400, 'INVALID_RESET_TOKEN', 'Reset token is invalid or expired.');
-      const updated = await this.db.admins.updateOne({ _id: reset.adminId, status: 'active' },
+      const updated = await this.db.groups.updateOne({ _id: reset.groupId, status: 'active' },
         { $set: { passwordHash, updatedAt: now }, $inc: { authVersion: 1 } }, { session });
       if (!updated.matchedCount) throw new HttpError(400, 'INVALID_RESET_TOKEN', 'Reset token is invalid or expired.');
-      await this.db.sessions.updateMany({ adminId: reset.adminId }, { $set: { revokedAt: now, updatedAt: now } }, { session });
-      await this.db.resets.updateMany({ adminId: reset.adminId, consumedAt: null }, { $set: { consumedAt: now, updatedAt: now } }, { session });
+      await this.db.sessions.updateMany({ groupId: reset.groupId }, { $set: { revokedAt: now, updatedAt: now } }, { session });
+      await this.db.resets.updateMany({ groupId: reset.groupId, consumedAt: null }, { $set: { consumedAt: now, updatedAt: now } }, { session });
     });
   }
 
@@ -130,7 +127,7 @@ export class AuthService {
   };
 }
 
-export const requireAdmin: RequestHandler = (_req, res, next) => {
+export const requireGroup: RequestHandler = (_req, res, next) => {
   if (!res.locals.auth) throw unauthorized();
   next();
 };

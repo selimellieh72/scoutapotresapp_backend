@@ -1,0 +1,9 @@
+[
+  {
+    "username": "example_group",
+    "email": "example_group@accounts.invalid",
+    "name": "Example Group",
+    "description": "",
+    "password": "replace-with-a-strong-password"
+  }
+]

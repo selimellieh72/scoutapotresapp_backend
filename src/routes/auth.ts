@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { rateLimit } from 'express-rate-limit';
-import { adminDto, AuthService, requireAdmin } from '../services/auth.js';
+import { accountDto, AuthService, requireGroup } from '../services/auth.js';
 
 export function authRouter(auth: AuthService, limits: boolean) {
   const router = Router();
@@ -40,7 +40,7 @@ export function authRouter(auth: AuthService, limits: boolean) {
   return router;
 }
 
-export const meRouter = Router().get('/', requireAdmin, (_req, res) => {
+export const meRouter = Router().get('/', requireGroup, (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ data: adminDto(res.locals.auth.admin) });
+  res.json({ data: accountDto(res.locals.auth.group) });
 });
